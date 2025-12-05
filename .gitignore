@@ -12,6 +12,6 @@
 !*.md
 !LICENSE
 !.gitignore
-!.slx
-!.m
-!.pdf
+!*.slx
+!*.m
+!*.pdf
