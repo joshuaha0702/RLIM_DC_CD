@@ -3,7 +3,7 @@
 mdl      = 'fSystemRLIM';
 agentBlk = [mdl '/RL Agent'];
 
-nx = 3;  % 상태 차원
+nx = 8;  % 상태 차원
 nu = 1;  % action 차원
 
 obsInfo = rlNumericSpec([nx 1]);
@@ -15,27 +15,28 @@ actInfo.Name = 'action';
 env = rlSimulinkEnv(mdl, agentBlk, obsInfo, actInfo);
 env.ResetFcn = @localResetFcn;
 %% Critic 네트워크 정의
-hSize = 32;
+CN = 80;
 
+% 2-1. 입력 경로 (State & Action)
 statePath = [
     featureInputLayer(nx, 'Normalization','none', 'Name','state')
-    fullyConnectedLayer(hSize, 'Name','c_fc1')
-    reluLayer('Name','c_relu1')
-    fullyConnectedLayer(hSize, 'Name','c_fc2')
-    reluLayer('Name','c_relu2')
+    fullyConnectedLayer(CN, 'Name','c_fc1_s') % Layer 1 (State path)
     ];
 
 actionPath = [
     featureInputLayer(nu, 'Normalization','none', 'Name','action')
-    fullyConnectedLayer(hSize, 'Name','c_fc3')
-    reluLayer('Name','c_relu3')
+    fullyConnectedLayer(CN, 'Name','c_fc1_a') % Layer 1 (Action path)
     ];
 
 commonPath = [
     additionLayer(2, 'Name','add')
+    reluLayer('Name','c_relu1')
+    fullyConnectedLayer(CN, 'Name','c_fc2')   % Layer 2
+    reluLayer('Name','c_relu2')
+    fullyConnectedLayer(CN, 'Name','c_fc3')   % Layer 3
+    reluLayer('Name','c_relu3')
+    fullyConnectedLayer(CN, 'Name','c_fc4')   % Layer 4
     reluLayer('Name','c_relu4')
-    fullyConnectedLayer(hSize, 'Name','c_fc4')
-    reluLayer('Name','c_relu5')
     fullyConnectedLayer(1, 'Name','Qvalue')
     ];
 
@@ -43,39 +44,43 @@ criticLG = layerGraph(statePath);
 criticLG = addLayers(criticLG, actionPath);
 criticLG = addLayers(criticLG, commonPath);
 
-criticLG = connectLayers(criticLG,'c_relu2','add/in1');
-criticLG = connectLayers(criticLG,'c_relu3','add/in2');
-
+% 레이어 연결
+criticLG = connectLayers(criticLG, 'c_fc1_s', 'add/in1');
+criticLG = connectLayers(criticLG, 'c_fc1_a', 'add/in2');
 criticOpts = rlRepresentationOptions( ...
-    'LearnRate',5e-4, ...
+    'LearnRate', 0.0003, ...
     'GradientThreshold',1);
 
 critic = rlQValueRepresentation(criticLG, obsInfo, actInfo, ...
     'Observation', {'state'}, ...
     'Action', {'action'}, ...
-    criticOpts);
+     criticOpts);
 
 %% Actor 네트워크 정의
+AN = 10;
+
 actorLayers = [
-    featureInputLayer(nx, 'Normalization','none','Name','state')
-    fullyConnectedLayer(hSize, 'Name','a_fc1')
+    featureInputLayer(nx, 'Normalization','none', 'Name','state')
+    fullyConnectedLayer(AN, 'Name','a_fc1')    % Layer 1
     reluLayer('Name','a_relu1')
-    fullyConnectedLayer(hSize, 'Name','a_fc2')
+    fullyConnectedLayer(AN, 'Name','a_fc2')    % Layer 2
     reluLayer('Name','a_relu2')
-    fullyConnectedLayer(nu, 'Name','a_fc3')
-    tanhLayer('Name','tanh')   % 출력 범위 [-1,1]
-    ];
+    fullyConnectedLayer(AN, 'Name','a_fc3')    % Layer 3
+    reluLayer('Name','a_relu3')
+    fullyConnectedLayer(nu, 'Name','a_fc_out') % Output Layer
+    tanhLayer('Name','tanh')                   % 출력 범위 [-1, 1]
+];
 
 actorLG = layerGraph(actorLayers);
 
 actorOpts = rlRepresentationOptions( ...
-    'LearnRate',5e-4, ...
+    'LearnRate',0.0003, ...
     'GradientThreshold',1);
 
 actor = rlDeterministicActorRepresentation(actorLG, obsInfo, actInfo, ...
     'Observation', {'state'}, ...
     'Action', {'tanh'}, ...
-    actorOpts);
+     actorOpts);
 
 %% Agent 옵션
 Ts = 200e-6;   % 에이전트 샘플링 시간 (Simulink RL Agent 블록과 동일하게)
@@ -83,7 +88,7 @@ Ts = 200e-6;   % 에이전트 샘플링 시간 (Simulink RL Agent 블록과 동�
 agentOpts = rlDDPGAgentOptions;
 agentOpts.SampleTime     = Ts;
 agentOpts.DiscountFactor = 0.99;
-agentOpts.TargetSmoothFactor = 20e-6;
+agentOpts.TargetSmoothFactor = 1e-3;
 
 % 버전에 맞게 필드명 확인 필요
 agentOpts.NoiseOptions.Variance          = 0.3;
@@ -92,20 +97,19 @@ agentOpts.NoiseOptions.VarianceMin       = 0.05;   % 또는 MinimumVariance
 
 agent = rlDDPGAgent(actor, critic, agentOpts);
 
-
-
-
 % 1) training options 설정
 trainOpts = rlTrainingOptions( ...
     MaxEpisodes        = 2000, ...
     MaxStepsPerEpisode = 500, ...
     StopTrainingCriteria = "EpisodeCount", ...
     StopTrainingValue    = 500, ...   % 그냥 500 에피소드 꽉 채우기 예시
-    SaveAgentCriteria    = "EpisodeCount", ...  % 에피소드 수 기준으로 저장
-    SaveAgentValue       = 1, ...               % 1 에피소드마다 저장 → Agent1, Agent2, ...
+    SaveAgentCriteria    = "EpisodeReward", ...  % 저장 기준: 에피소드 보상
+    SaveAgentValue       = -5000, ...            % 저장 임계값: -5000점 이상일 때만 저장
     SaveAgentDirectory   = "savedAgents", ...
     Plots                = "training-progress", ...
     Verbose              = false);
+
+%% training
 % 1개 출력만!
 trainingStats = train(agent, env, trainOpts);
 
@@ -118,7 +122,7 @@ bestFile = fullfile(trainOpts.SaveAgentDirectory, ...
 
 
 %% load file
-tmp = load("savedAgents\Agent47.mat");
+tmp = load("Agent360.mat");
 %tmp = load(bestFile);
 bestAgent = tmp.saved_agent;
 
