@@ -3,7 +3,7 @@
 mdl      = 'fSystemRLIM';
 agentBlk = [mdl '/RL Agent'];
 
-nx = 10;  % 상태 차원
+nx = 11;  % 상태 차원
 nu = 1;  % action 차원
 
 obsInfo = rlNumericSpec([nx 1]);
@@ -122,7 +122,8 @@ bestFile = fullfile(trainOpts.SaveAgentDirectory, ...
 
 
 %% load file
-tmp = load("savedAgents/Agent203.mat");
+tmp = load("savedAgents/Agent394.mat");
+%tmp = load("Pcl0W.mat");
 %tmp = load(bestFile);
 bestAgent = tmp.saved_agent;
 
