@@ -122,7 +122,7 @@ bestFile = fullfile(trainOpts.SaveAgentDirectory, ...
 
 
 %% load file
-tmp = load("savedAgents/Agent394.mat");
+tmp = load("FINAL.mat");
 %tmp = load("Pcl0W.mat");
 %tmp = load(bestFile);
 bestAgent = tmp.saved_agent;
